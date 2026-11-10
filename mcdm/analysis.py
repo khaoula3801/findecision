@@ -1,33 +1,25 @@
 import numpy as np
 import pandas as pd
-
 from . import ranking as R
 
+def compare_methods(methods,df,types,w):return pd.DataFrame({m:R.run(m,df,types,w)['ranks'] for m in methods})
+def adjust(w,crit,x):
+ base=w.copy().astype(float);rem=base.sum()-base[crit]
+ if rem<=1e-12:
+  base[:]= (1-x)/(len(base)-1) if len(base)>1 else 1
+ else:
+  for c in base.index:
+   if c!=crit:base[c]=base[c]*(1-x)/rem
+ base[crit]=x
+ return base/base.sum()
+def weight_sweep(df,types,w,method,crit,**params):
+ return pd.DataFrame({round(float(x),2):R.run(method,df,types,adjust(w,crit,float(x)),**params)['ranks'] for x in np.linspace(0,1,21)}).T
 
-def compare_methods(methods, df, types, w):
-    return pd.DataFrame({m: R.run(m, df, types, w)["ranks"] for m in methods})
-
-
-def weight_sweep(df, types, w, method, crit, steps=21, **params):
-    grid = np.linspace(0, 1, steps)
-    rest = w.drop(crit)
-    rest = rest / rest.sum() if rest.sum() > 0 else rest + 1 / len(rest)
-    rows = {}
-    for g in grid:
-        w2 = (rest * (1 - g)).copy()
-        w2[crit] = g
-        rows[round(g, 4)] = R.run(method, df, types, w2.reindex(w.index), **params)["ranks"]
-    out = pd.DataFrame(rows).T
-    out.index.name = "Poids"
-    return out
-
-
-def monte_carlo(df, types, w, method, n=500, noise=0.3, seed=0, **params):
-    rng = np.random.default_rng(seed)
-    ranks = []
-    for _ in range(n):
-        w2 = w * rng.uniform(1 - noise, 1 + noise, len(w))
-        ranks.append(R.run(method, df, types, w2 / w2.sum(), **params)["ranks"])
-    rk = pd.DataFrame(ranks)
-    return pd.DataFrame({"% classé 1er": (rk == 1).mean() * 100, "Rang moyen": rk.mean(),
-                         "Meilleur rang": rk.min(), "Pire rang": rk.max()}).sort_values("Rang moyen")
+def monte_carlo(df,types,w,method,n=500,noise=.3,**params):
+ rng=np.random.default_rng(2026); counts=pd.Series(0,index=df.index,dtype=float)
+ for i in range(n):
+  ww=w.to_numpy()*rng.uniform(1-noise,1+noise,len(w));ww=pd.Series(ww/ww.sum(),index=w.index)
+  res=R.run(method,df,types,ww,**params)
+  winners=res['ranks'][res['ranks']==1].index
+  counts.loc[winners]+=1/len(winners)
+ return pd.DataFrame({'% classé 1er':counts*100/n})
